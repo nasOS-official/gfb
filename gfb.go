@@ -16,13 +16,13 @@ import (
 	"github.com/crazy3lf/colorconv"
 )
 
-var resX, resY int = getResolution("fb0")
+var resX, resY int = GetResolution("fb0")
 
-func initFb() []uint8 {
+func InitFb() []uint8 {
 	return make([]uint8, (resX * resY * 4))
 }
 
-func getResolution(fbName string) (resX, resY int) {
+func GetResolution(fbName string) (resX, resY int) {
 	fbrel, _ := ioutil.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
 	fmt.Println(len(fbrel))
 	fbstr := string(fbrel[:len(fbrel)-1])
@@ -32,49 +32,49 @@ func getResolution(fbName string) (resX, resY int) {
 	return resX, resY
 }
 
-func setpoint(fb []uint8, x int, y int, r uint8, g uint8, b uint8) []uint8 {
+func SetPoint(fb []uint8, x int, y int, r uint8, g uint8, b uint8) []uint8 {
 	fb[(resX*x+y)*4] = b
 	fb[(resX*x+y)*4+1] = g
 	fb[(resX*x+y)*4+2] = r
 	fb[(resX*x+y)*4+3] = 0
 	return fb
 }
-func setpointHue(fb []uint8, x int, y int, hue float64, saturation float64, value float64) []uint8 {
+func SetPointHue(fb []uint8, x int, y int, hue float64, saturation float64, value float64) []uint8 {
 	r, g, b, _ := colorconv.HSVToRGB(hue, saturation, value)
-	return setpoint(fb, x, y, r, g, b)
+	return SetPoint(fb, x, y, r, g, b)
 }
-func drawRectangle(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
+func DrawRectangle(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
 	for y := ystart; y <= yend; y++ {
 		for x := xstart; x <= xend; x++ {
-			fb = setpoint(fb, y, x, r, g, b)
+			fb = SetPoint(fb, y, x, r, g, b)
 		}
 	}
 
 }
 
-func drawTestRainbow(fb []uint8, xstart int, xend int, ystart int, yend int) {
+func DrawTestRainbow(fb []uint8, xstart int, xend int, ystart int, yend int) {
 	var n float64 = 1
 
 	for y := ystart; y < yend; y++ {
 		for x := xstart; x < xend; x++ {
-			fb = setpointHue(fb, x, y, n/(float64(yend-ystart)*3), 0.9, 0.9)
+			fb = SetPointHue(fb, x, y, n/(float64(yend-ystart)*3), 0.9, 0.9)
 			n++
 		}
 	}
 }
 
-func drawCircle(fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
+func DrawCircle(fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
 	for y := y_center - radius; y <= y_center+radius; y++ {
 		for x := x_center - radius; x <= x_center+radius; x++ {
 			if (x-x_center)*(x-x_center)+(y-y_center)*(y-y_center) <= radius*radius {
-				fb = setpoint(fb, y, x, r, g, b)
+				fb = SetPoint(fb, y, x, r, g, b)
 			}
 		}
 	}
 
 }
 
-func drawLine(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
+func DrawLine(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
 	// Calculate the distance and direction of the line
 	dx := xend - xstart
 	dy := yend - ystart
@@ -84,14 +84,14 @@ func drawLine(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g
 	for t := 0.0; t <= 1.0; t += 1.0 / dist {
 		x := int(float64(xstart) + t*float64(dx))
 		y := int(float64(ystart) + t*float64(dy))
-		fb = setpoint(fb, x, y, r, g, b)
+		fb = SetPoint(fb, x, y, r, g, b)
 	}
 
 }
 
 //lint:ignore U1000 Ignore unused function temporarily for debugging
 
-func writeWebp(data []uint8, width, height int, filepath string) error {
+func WriteWebp(data []uint8, width, height int, filepath string) error {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
