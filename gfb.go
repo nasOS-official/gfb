@@ -113,7 +113,7 @@ func WriteWebp(data []uint8, width, height int, filepath string) error {
 	}
 	return nil
 }
-func update_screen(fb []uint8) {
+func UpdateScreen(fb []uint8) {
 	_ = os.WriteFile("/dev/fb0", fb, 0644)
 }
 
