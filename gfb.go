@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/png"
 	"io/ioutil"
 	"math"
 	"os"
@@ -87,6 +88,34 @@ func DrawLine(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g
 		fb = SetPoint(fb, x, y, r, g, b)
 	}
 
+}
+func ShowPNG(fb []uint8, filepath string, dx int, dy int) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	img, err := png.Decode(file)
+	if err != nil {
+		panic(err)
+	}
+
+	bounds := img.Bounds()
+
+	// Iterate over the image pixels and set them in the framebuffer.
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			// Get the pixel color.
+			r, g, b, _ := img.At(x, y).RGBA()
+
+			// Set the pixel in the framebuffer.
+			fb = SetPoint(fb, x+dx, y+dy, uint8(r), uint8(g), uint8(b))
+		}
+	}
+
+	// Update the screen with the framebuffer.
+	UpdateScreen(fb)
 }
 
 //lint:ignore U1000 Ignore unused function temporarily for debugging
