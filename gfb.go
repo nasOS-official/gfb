@@ -2,7 +2,6 @@ package gfb
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -25,7 +24,6 @@ func InitFb() []uint8 {
 
 func GetResolution(fbName string) (resX, resY int) {
 	fbrel, _ := ioutil.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
-	fmt.Println(len(fbrel))
 	fbstr := string(fbrel[:len(fbrel)-1])
 	fblist := strings.Split(fbstr, ",")
 	resX, _ = strconv.Atoi(fblist[0])
