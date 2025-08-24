@@ -12,29 +12,44 @@
 package gfb
 
 import (
-	"bytes"
-	"image"
-	"image/color"
-	"image/png"
-	"io/ioutil"
-	"math"
 	"os"
 	"strconv"
 	"strings"
 
-	"github.com/chai2010/webp"
-
 	"github.com/crazy3lf/colorconv"
+	"golang.org/x/sys/unix"
 )
 
 var resX, resY int = GetResolution("fb0")
+var fbSize int = resX * resY * 4
 
-func InitFb() []uint8 {
-	return make([]uint8, (resX * resY * 4))
+var fbMmap []byte
+
+func InitFb() []byte {
+	fbFile, err := os.OpenFile("/dev/fb0", os.O_RDWR, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	fbMmap, err = unix.Mmap(
+		int(fbFile.Fd()),
+		0,
+		fbSize,
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return make([]byte, fbSize)
+}
+
+func ClearScreen(fb []byte) {
+	copy(fb, make([]byte, fbSize))
 }
 
 func GetResolution(fbName string) (resX, resY int) {
-	fbrel, _ := ioutil.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
+	fbrel, _ := os.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
 	fbstr := string(fbrel[:len(fbrel)-1])
 	fblist := strings.Split(fbstr, ",")
 	resX, _ = strconv.Atoi(fblist[0])
@@ -42,133 +57,226 @@ func GetResolution(fbName string) (resX, resY int) {
 	return resX, resY
 }
 
-func SetPoint(fb []uint8, x int, y int, r uint8, g uint8, b uint8) []uint8 {
-	fb[(resX*x+y)*4] = b
-	fb[(resX*x+y)*4+1] = g
-	fb[(resX*x+y)*4+2] = r
-	fb[(resX*x+y)*4+3] = 0
-	return fb
+func SetPoint(fb []uint8, x int, y int, r uint8, g uint8, b uint8) {
+	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
+		offset := (resX*y + x) * 4
+		fb[offset] = b
+		fb[offset+1] = g
+		fb[offset+2] = r
+		fb[offset+3] = 0
+	}
 }
-func SetPointHue(fb []uint8, x int, y int, hue float64, saturation float64, value float64) []uint8 {
+func SetPointHue(fb []uint8, x int, y int, hue float64, saturation float64, value float64) {
 	r, g, b, _ := colorconv.HSVToRGB(hue, saturation, value)
-	return SetPoint(fb, x, y, r, g, b)
+	SetPoint(fb, x, y, r, g, b)
 }
+
 func DrawRectangle(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
-	for y := ystart; y <= yend; y++ {
-		for x := xstart; x <= xend; x++ {
-			fb = SetPoint(fb, y, x, r, g, b)
-		}
+	lenght := yend - ystart
+	for x := xstart; x <= xend; x++ {
+		DrawVLine(fb, x, ystart, lenght, r, g, b)
 	}
 
 }
 
 func DrawTestRainbow(fb []uint8, xstart int, xend int, ystart int, yend int) {
-	var n float64 = 1
-
-	for y := ystart; y < yend; y++ {
-		for x := xstart; x < xend; x++ {
-			fb = SetPointHue(fb, x, y, n/(float64(yend-ystart)*3), 0.9, 0.9)
-			n++
-		}
+	var n float64 = 0
+	var add float64 = 360.0 / float64(xend-xstart)
+	lenght := yend - ystart
+	for x := xstart; x < xend; x++ {
+		r, g, b, _ := colorconv.HSVToRGB(n, 0.9, 0.9)
+		DrawVLine(fb, x, ystart, lenght, r, g, b)
+		n += add
 	}
 }
 
-func DrawCircle(fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
-	for y := y_center - radius; y <= y_center+radius; y++ {
-		for x := x_center - radius; x <= x_center+radius; x++ {
-			if (x-x_center)*(x-x_center)+(y-y_center)*(y-y_center) <= radius*radius {
-				fb = SetPoint(fb, y, x, r, g, b)
-			}
-		}
+func GetPoint(fb []uint8, x int, y int) (r, g, b uint8) {
+	r, g, b = 0, 0, 0
+	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
+		offset := (resX*y + x) * 4
+		b = fb[offset]
+		g = fb[offset+1]
+		r = fb[offset+2]
 	}
-
+	return r, g, b
 }
 
-func DrawLine(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
-	// Calculate the distance and direction of the line
-	dx := xend - xstart
-	dy := yend - ystart
-	dist := math.Sqrt(float64(dx*dx + dy*dy))
+// func DrawCircle(fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
 
-	// Draw the line by setting the color of each pixel along its path
-	for t := 0.0; t <= 1.0; t += 1.0 / dist {
-		x := int(float64(xstart) + t*float64(dx))
-		y := int(float64(ystart) + t*float64(dy))
-		fb = SetPoint(fb, x, y, r, g, b)
-	}
+// 	antiAliasRadius := 1.5
 
-}
-func ShowPNG(fb []uint8, filepath string, dx int, dy int) {
-	file, err := os.Open(filepath)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
+// 	for x := x_center - radius - int(antiAliasRadius); x <= x_center+radius+int(antiAliasRadius); x++ {
+// 		for y := y_center - radius - int(antiAliasRadius); y <= y_center+radius+int(antiAliasRadius); y++ {
 
-	img, err := png.Decode(file)
-	if err != nil {
-		panic(err)
-	}
+// 			distSquared := float64((x-x_center)*(x-x_center) + (y-y_center)*(y-y_center))
+// 			dist := math.Sqrt(distSquared)
+// 			radiusSq := float64(radius * radius)
+// 			if distSquared <= radiusSq {
+// 				SetPoint(fb, x, y, r, g, b)
+// 			} else {
+// 				coverage := (dist - float64(radius)) / antiAliasRadius
+// 				if coverage < 0 {
+// 					coverage = 0
+// 				}
+// 				if coverage > 1 {
+// 					coverage = 1
+// 				}
+// 				bg_r, bg_g, bg_b := GetPoint(fb, x, y)
+// 				// blended_r := uint8(float64(r)*(1.0-coverage) + float64(bg_r)*coverage)
+// 				// blended_g := uint8(float64(g)*(1.0-coverage) + float64(bg_g)*coverage)
+// 				// blended_b := uint8(float64(b)*(1.0-coverage) + float64(bg_b)*coverage)
+// 				blended_r := bg_r/2 + r
+// 				blended_g := bg_g/2 + g
+// 				blended_b := bg_b/2 + b
 
-	bounds := img.Bounds()
-
-	// Iterate over the image pixels and set them in the framebuffer.
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			// Get the pixel color.
-			r, g, b, _ := img.At(x, y).RGBA()
-
-			// Set the pixel in the framebuffer.
-			fb = SetPoint(fb, x+dx, y+dy, uint8(r), uint8(g), uint8(b))
-		}
-	}
-
-	// Update the screen with the framebuffer.
-	UpdateScreen(fb)
-}
-
-//lint:ignore U1000 Ignore unused function temporarily for debugging
-
-func WriteWebp(data []uint8, width, height int, filepath string) error {
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := (y*width + x) * 4
-			b := data[index]
-			g := data[index+1]
-			r := data[index+2]
-			a := uint8(255)
-			img.SetRGBA(x, y, color.RGBA{r, g, b, a})
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := webp.Encode(&buf, img, nil); err != nil {
-		return err
-	}
-	if err := ioutil.WriteFile(filepath, buf.Bytes(), 0666); err != nil {
-		return err
-	}
-	return nil
-}
-func UpdateScreen(fb []uint8) {
-	_ = os.WriteFile("/dev/fb0", fb, 0644)
-}
-
-// func main() {
-// 	fmt.Println("gfbos -  Go FrameBuffer")
-// 	fmt.Println("Current Screen resolution is " + strconv.Itoa(resX) + "x" + strconv.Itoa(resY) + "px")
-// 	fb := initFb()
-// 	// drawTestRainbow(fb, (resX-resY)/2, resY+((resX-resY)/2), 0, resY)
-// 	drawRectangle(fb, 40, 500, 50, 100, 0, 255, 26)
-// 	drawLine(fb, 80, 800, 50, 100, 0, 255, 26)
-// 	drawTestRainbow(fb, 50, 320, 50, 320)
-// 	drawCircle(fb, 600, 600, 300, 255, 255, 0)
-// 	drawCircle(fb, 70, 70, 50, 255, 0, 0)
-// 	drawCircle(fb, 70, 120, 50, 0, 255, 0)
-// 	drawCircle(fb, 70, 170, 50, 0, 0, 255)
-// 	update_screen(fb)
-// 	// _ = writeWebp(fb, resX, resY, "./test.webp")
-
-// 	os.Exit(0)
+// 				SetPoint(fb, x, y, blended_r, blended_g, blended_b)
+// 			}
+// 		}
+// 	}
 // }
+
+func blendPoint(fb []uint8, x, y int, r, g, b uint8, alpha uint8) {
+	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
+		offset := (resX*y + x) * 4
+		br := fb[offset+2]
+		bg := fb[offset+1]
+		bb := fb[offset]
+
+		inv := 255 - alpha
+
+		fb[offset] = uint8((int(bb)*int(inv) + int(b)*int(alpha)) / 255)
+		fb[offset+1] = uint8((int(bg)*int(inv) + int(g)*int(alpha)) / 255)
+		fb[offset+2] = uint8((int(br)*int(inv) + int(r)*int(alpha)) / 255)
+		fb[offset+3] = 0
+	}
+}
+
+func DrawCircle(fb []uint8, y_center, x_center, radius int, r, g, b uint8) {
+	x, y := radius, 0
+	p := 1 - radius
+
+	for x >= y {
+		DrawHLine(fb, x_center-x, y_center+y, x<<1, r, g, b)
+		if y != 0 {
+			DrawHLine(fb, x_center-x, y_center-y, x<<1, r, g, b)
+		}
+
+		if x != y && y != 0 {
+			DrawHLine(fb, x_center-y, y_center+x, y<<1, r, g, b)
+			DrawHLine(fb, x_center-y, y_center-x, y<<1, r, g, b)
+		}
+
+		y++
+		if p <= 0 {
+			p += y<<1 + 1
+		} else {
+			x--
+			p += y<<1 - x<<1 + 1
+		}
+	}
+}
+
+func DrawLine(fb []uint8, x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b uint8) {
+	const M = 15
+	const Ms = 1 << M
+	const I = 0xff
+
+	if x1 == x0 {
+		DrawVLine(fb, x0, y0, y1-y0, r, g, b)
+		return
+	} else if y1 == y0 {
+		DrawHLine(fb, x0, y0, x1-x0, r, g, b)
+		return
+	}
+
+	dx := x1 - x0
+	dy := y1 - y0
+	d := (dy << M) / dx
+
+	SetPoint(fb, x0, y0, r, g, b)
+	SetPoint(fb, x1, y1, r, g, b)
+
+	D := 0
+	for x := x0; x <= x1; x++ {
+		D += d
+		if D >= Ms {
+			D -= Ms
+			y0++
+		}
+
+		v := (D >> 7) & I
+		c1 := uint8(I - v)
+		c2 := uint8(v)
+
+		blendPoint(fb, x, y0, r, g, b, c1)
+		blendPoint(fb, x, y0+1, r, g, b, c2)
+	}
+}
+
+func DrawHLine(fb []uint8, xstart, y, length int, r, g, b uint8) {
+	if y < 0 || y >= resY {
+		return
+	}
+	if xstart < 0 {
+		length += xstart
+		xstart = 0
+	}
+	xend := xstart + length
+	if xend >= resX {
+		xend = resX - 1
+	}
+
+	offset := (y*resX + xstart) * 4
+	for x := xstart; x <= xend; x++ {
+		fb[offset] = b
+		fb[offset+1] = g
+		fb[offset+2] = r
+		fb[offset+3] = 0
+		offset += 4
+	}
+}
+
+func DrawVLine(fb []uint8, x, ystart, length int, r, g, b uint8) {
+	if x < 0 || x >= resX {
+		return
+	}
+	if ystart < 0 {
+		length += ystart
+		ystart = 0
+	}
+	yend := ystart + length
+	if yend >= resY {
+		yend = resY - 1
+	}
+
+	offset := (ystart*resX + x) * 4
+	for y := ystart; y <= yend; y++ {
+		fb[offset] = b
+		fb[offset+1] = g
+		fb[offset+2] = r
+		fb[offset+3] = 0
+		offset += resX * 4
+	}
+}
+
+func UpdateScreen(fb []uint8) {
+	copy(fbMmap, fb)
+}
+
+// //
+// func main() {
+
+// 	fb := InitFb()
+// 	// drawTestRainbow(fb, (resX-resY)/2, resY+((resX-resY)/2), 0, resY)
+// 	DrawRectangle(fb, 40, 500, 50, 100, 0, 255, 26)
+// 	DrawLine(fb, 80, 800, 50, 100, 0, 255, 26)
+// 	DrawTestRainbow(fb, 50, 320, 50, 320)
+// 	DrawCircle(fb, 600, 600, 300, 255, 255, 0)
+// 	DrawCircle(fb, 70, 70, 50, 255, 0, 0)
+// 	DrawCircle(fb, 70, 120, 50, 0, 255, 0)
+// 	DrawCircle(fb, 70, 170, 50, 0, 0, 255)
+// 	UpdateScreen(fb)
+
+//		os.Exit(0)
+//	}
+//
