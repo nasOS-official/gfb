@@ -1,14 +1,16 @@
-// Copyright (C) Egor
-// This library is free software; you can redistribute it and/or
-// modify it under the terms of the GNU Lesser General Public
-// License as published by the Free Software Foundation; either
-// version 2.1 of the License, or (at your option) any later version.
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-// Lesser General Public License for more details.
-// GNU Lesser General Public Licence is available at
-// http://www.gnu.org/copyleft/lesser.html
+// Package gfb provides a simple API for drawing graphics directly to a Linux framebuffer.
+// It allows low-level manipulation of pixels, shapes, and colors using raw memory-mapped buffers.
+//
+// Typical usage:
+//
+//	var fb gfb.Gfb
+//	fb.InitFb(0)
+//	fb.ClearScreen()
+//	fb.DrawRectangle(40, 200, 50, 100, 255, 0, 0)
+//	fb.DrawCircle(300, 300, 100, 0, 255, 0)
+//	fb.DrawLine(100, 400, 200, 500, 0, 0, 255)
+//	fb.UpdateScreen()
+
 package gfb
 
 import (
@@ -22,13 +24,18 @@ import (
 
 var fbMmap []byte
 
+// Gfb represents a framebuffer device with resolution and pixel buffer.
 type Gfb struct {
-	ResX   int
-	ResY   int
-	Fb     []byte
-	fbSize int
+	ResX   int    // Horizontal resolution (pixels)
+	ResY   int    // Vertical resolution (pixels)
+	Fb     []byte // Framebuffer copy in memory
+	fbSize int    // Size of framebuffer (bytes)
 }
 
+// Initializes the framebuffer device /dev/fb<num>.
+// Reads resolution from /sys/class/graphics/fb<num>/virtual_size.
+// Memory maps the framebuffer into process memory.
+// Allocates an internal buffer (Fb) for drawing.
 func (gfb *Gfb) InitFb(num int) {
 	gfb.ResX, gfb.ResY = GetResolution("fb" + strconv.Itoa(num))
 	gfb.fbSize = gfb.ResX * gfb.ResY * 4
@@ -51,10 +58,14 @@ func (gfb *Gfb) InitFb(num int) {
 	gfb.Fb = make([]byte, gfb.fbSize)
 }
 
+// Clears the internal framebuffer buffer (sets all pixels to black).
 func (gfb *Gfb) ClearScreen() {
 	copy(gfb.Fb, make([]byte, gfb.fbSize))
 }
 
+// GetResolution reads the resolution of a framebuffer device from sysfs.
+// fbName should be like "fb0".
+// Returns horizontal and vertical resolution in pixels.
 func GetResolution(fbName string) (ResX, ResY int) {
 	fbrel, _ := os.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
 	fbstr := string(fbrel[:len(fbrel)-1])
@@ -64,6 +75,8 @@ func GetResolution(fbName string) (ResX, ResY int) {
 	return ResX, ResY
 }
 
+// SetPoint sets a pixel at (x, y) to the given RGB color.
+// Pixels outside the screen bounds are ignored.
 func (gfb *Gfb) SetPoint(x int, y int, r uint8, g uint8, b uint8) {
 	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
 		offset := (gfb.ResX*y + x) * 4
@@ -73,11 +86,16 @@ func (gfb *Gfb) SetPoint(x int, y int, r uint8, g uint8, b uint8) {
 		gfb.Fb[offset+3] = 0
 	}
 }
+
+// SetPointHue sets a pixel at (x, y) using HSV color space.
+// Hue, saturation, and value are converted to RGB before writing.
 func (gfb *Gfb) SetPointHue(x int, y int, hue float64, saturation float64, value float64) {
 	r, g, b, _ := colorconv.HSVToRGB(hue, saturation, value)
 	gfb.SetPoint(x, y, r, g, b)
 }
 
+// DrawRectangle draws a filled rectangle between (xstart, ystart) and (xend, yend)
+// with the given RGB color.
 func (gfb *Gfb) DrawRectangle(xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
 	lenght := yend - ystart
 	for x := xstart; x <= xend; x++ {
@@ -86,6 +104,7 @@ func (gfb *Gfb) DrawRectangle(xstart int, xend int, ystart int, yend int, r uint
 
 }
 
+// DrawTestRainbow draws a horizontal rainbow gradient within the given rectangle.
 func (gfb *Gfb) DrawTestRainbow(xstart int, xend int, ystart int, yend int) {
 	var n float64 = 0
 	var add float64 = 360.0 / float64(xend-xstart)
@@ -97,6 +116,8 @@ func (gfb *Gfb) DrawTestRainbow(xstart int, xend int, ystart int, yend int) {
 	}
 }
 
+// GetPoint returns the RGB color of the pixel at (x, y).
+// If the coordinates are out of bounds, returns black (0,0,0).
 func (gfb *Gfb) GetPoint(x int, y int) (r, g, b uint8) {
 	r, g, b = 0, 0, 0
 	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
@@ -142,6 +163,8 @@ func (gfb *Gfb) GetPoint(x int, y int) (r, g, b uint8) {
 // 	}
 // }
 
+// blendPoint draws a pixel at (x, y) with RGB color and alpha blending
+// against the existing buffer
 func (gfb *Gfb) blendPoint(x, y int, r, g, b uint8, alpha uint8) {
 	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
 		offset := (gfb.ResX*y + x) * 4
@@ -158,6 +181,7 @@ func (gfb *Gfb) blendPoint(x, y int, r, g, b uint8, alpha uint8) {
 	}
 }
 
+// DrawCircle draws a circle outline with the given center, radius, and RGB color.
 func (gfb *Gfb) DrawCircle(y_center, x_center, radius int, r, g, b uint8) {
 	x, y := radius, 0
 	p := 1 - radius
@@ -183,6 +207,8 @@ func (gfb *Gfb) DrawCircle(y_center, x_center, radius int, r, g, b uint8) {
 	}
 }
 
+// DrawLine draws an anti-aliased line between (x0, y0) and (x1, y1)
+// with the given RGB color.
 func (gfb *Gfb) DrawLine(x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b uint8) {
 	const M = 15
 	const Ms = 1 << M
@@ -220,6 +246,7 @@ func (gfb *Gfb) DrawLine(x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b uin
 	}
 }
 
+// DrawHLine draws a horizontal line at y, starting at xstart with given length and RGB color.
 func (gfb *Gfb) DrawHLine(xstart, y, length int, r, g, b uint8) {
 	if y < 0 || y >= gfb.ResY {
 		return
@@ -243,6 +270,7 @@ func (gfb *Gfb) DrawHLine(xstart, y, length int, r, g, b uint8) {
 	}
 }
 
+// DrawVLine draws a vertical line at x, starting at ystart with given length and RGB color.
 func (gfb *Gfb) DrawVLine(x, ystart, length int, r, g, b uint8) {
 	if x < 0 || x >= gfb.ResX {
 		return
@@ -266,25 +294,8 @@ func (gfb *Gfb) DrawVLine(x, ystart, length int, r, g, b uint8) {
 	}
 }
 
+// UpdateScreen copies the internal framebuffer buffer to the actual framebuffer memory.
+// This must be called after drawing operations to update the display.
 func (gfb *Gfb) UpdateScreen() {
 	copy(fbMmap, gfb.Fb)
 }
-
-// func main() {
-
-// 	var fb Gfb
-// 	fb.InitFb(0)
-// 	fb.DrawTestRainbow((fb.ResX-fb.ResY)/2, fb.ResY+((fb.ResX-fb.ResY)/2), 0, fb.ResY)
-// 	fb.DrawRectangle(40, 500, 50, 100, 0, 255, 26)
-// 	fb.DrawLine(80, 800, 50, 100, 0, 255, 26)
-// 	fb.DrawTestRainbow(50, 320, 50, 320)
-// 	fb.DrawCircle(600, 600, 300, 255, 255, 0)
-// 	fb.DrawCircle(70, 70, 50, 255, 0, 0)
-// 	fb.DrawCircle(70, 120, 50, 0, 255, 0)
-// 	fb.DrawCircle(70, 170, 50, 0, 0, 255)
-// 	fb.UpdateScreen()
-
-// 	for {
-
-// 	}
-// }
