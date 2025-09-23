@@ -20,13 +20,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var resX, resY int = GetResolution("fb0")
-var fbSize int = resX * resY * 4
-
 var fbMmap []byte
 
-func InitFb() []byte {
-	fbFile, err := os.OpenFile("/dev/fb0", os.O_RDWR, 0)
+type Gfb struct {
+	ResX   int
+	ResY   int
+	Fb     []byte
+	fbSize int
+}
+
+func (gfb *Gfb) InitFb(num int) {
+	gfb.ResX, gfb.ResY = GetResolution("fb" + strconv.Itoa(num))
+	gfb.fbSize = gfb.ResX * gfb.ResY * 4
+
+	fbFile, err := os.OpenFile("/dev/fb"+strconv.Itoa(num), os.O_RDWR, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -34,74 +41,74 @@ func InitFb() []byte {
 	fbMmap, err = unix.Mmap(
 		int(fbFile.Fd()),
 		0,
-		fbSize,
+		gfb.fbSize,
 		unix.PROT_READ|unix.PROT_WRITE,
 		unix.MAP_SHARED,
 	)
 	if err != nil {
 		panic(err)
 	}
-	return make([]byte, fbSize)
+	gfb.Fb = make([]byte, gfb.fbSize)
 }
 
-func ClearScreen(fb []byte) {
-	copy(fb, make([]byte, fbSize))
+func (gfb *Gfb) ClearScreen() {
+	copy(gfb.Fb, make([]byte, gfb.fbSize))
 }
 
-func GetResolution(fbName string) (resX, resY int) {
+func GetResolution(fbName string) (ResX, ResY int) {
 	fbrel, _ := os.ReadFile("/sys/class/graphics/" + fbName + "/virtual_size")
 	fbstr := string(fbrel[:len(fbrel)-1])
 	fblist := strings.Split(fbstr, ",")
-	resX, _ = strconv.Atoi(fblist[0])
-	resY, _ = strconv.Atoi(fblist[1])
-	return resX, resY
+	ResX, _ = strconv.Atoi(fblist[0])
+	ResY, _ = strconv.Atoi(fblist[1])
+	return ResX, ResY
 }
 
-func SetPoint(fb []uint8, x int, y int, r uint8, g uint8, b uint8) {
-	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
-		offset := (resX*y + x) * 4
-		fb[offset] = b
-		fb[offset+1] = g
-		fb[offset+2] = r
-		fb[offset+3] = 0
+func (gfb *Gfb) SetPoint(x int, y int, r uint8, g uint8, b uint8) {
+	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
+		offset := (gfb.ResX*y + x) * 4
+		gfb.Fb[offset] = b
+		gfb.Fb[offset+1] = g
+		gfb.Fb[offset+2] = r
+		gfb.Fb[offset+3] = 0
 	}
 }
-func SetPointHue(fb []uint8, x int, y int, hue float64, saturation float64, value float64) {
+func (gfb *Gfb) SetPointHue(x int, y int, hue float64, saturation float64, value float64) {
 	r, g, b, _ := colorconv.HSVToRGB(hue, saturation, value)
-	SetPoint(fb, x, y, r, g, b)
+	gfb.SetPoint(x, y, r, g, b)
 }
 
-func DrawRectangle(fb []uint8, xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
+func (gfb *Gfb) DrawRectangle(xstart int, xend int, ystart int, yend int, r uint8, g uint8, b uint8) {
 	lenght := yend - ystart
 	for x := xstart; x <= xend; x++ {
-		DrawVLine(fb, x, ystart, lenght, r, g, b)
+		gfb.DrawVLine(x, ystart, lenght, r, g, b)
 	}
 
 }
 
-func DrawTestRainbow(fb []uint8, xstart int, xend int, ystart int, yend int) {
+func (gfb *Gfb) DrawTestRainbow(xstart int, xend int, ystart int, yend int) {
 	var n float64 = 0
 	var add float64 = 360.0 / float64(xend-xstart)
 	lenght := yend - ystart
 	for x := xstart; x < xend; x++ {
 		r, g, b, _ := colorconv.HSVToRGB(n, 0.9, 0.9)
-		DrawVLine(fb, x, ystart, lenght, r, g, b)
+		gfb.DrawVLine(x, ystart, lenght, r, g, b)
 		n += add
 	}
 }
 
-func GetPoint(fb []uint8, x int, y int) (r, g, b uint8) {
+func (gfb *Gfb) GetPoint(x int, y int) (r, g, b uint8) {
 	r, g, b = 0, 0, 0
-	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
-		offset := (resX*y + x) * 4
-		b = fb[offset]
-		g = fb[offset+1]
-		r = fb[offset+2]
+	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
+		offset := (gfb.ResX*y + x) * 4
+		b = gfb.Fb[offset]
+		g = gfb.Fb[offset+1]
+		r = gfb.Fb[offset+2]
 	}
 	return r, g, b
 }
 
-// func DrawCircle(fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
+// func DrawCircle(Fb []uint8, y_center int, x_center int, radius int, r uint8, g uint8, b uint8) {
 
 // 	antiAliasRadius := 1.5
 
@@ -112,7 +119,7 @@ func GetPoint(fb []uint8, x int, y int) (r, g, b uint8) {
 // 			dist := math.Sqrt(distSquared)
 // 			radiusSq := float64(radius * radius)
 // 			if distSquared <= radiusSq {
-// 				SetPoint(fb, x, y, r, g, b)
+// 				SetPoint(Fb, x, y, r, g, b)
 // 			} else {
 // 				coverage := (dist - float64(radius)) / antiAliasRadius
 // 				if coverage < 0 {
@@ -121,7 +128,7 @@ func GetPoint(fb []uint8, x int, y int) (r, g, b uint8) {
 // 				if coverage > 1 {
 // 					coverage = 1
 // 				}
-// 				bg_r, bg_g, bg_b := GetPoint(fb, x, y)
+// 				bg_r, bg_g, bg_b := GetPoint(Fb, x, y)
 // 				// blended_r := uint8(float64(r)*(1.0-coverage) + float64(bg_r)*coverage)
 // 				// blended_g := uint8(float64(g)*(1.0-coverage) + float64(bg_g)*coverage)
 // 				// blended_b := uint8(float64(b)*(1.0-coverage) + float64(bg_b)*coverage)
@@ -129,41 +136,41 @@ func GetPoint(fb []uint8, x int, y int) (r, g, b uint8) {
 // 				blended_g := bg_g/2 + g
 // 				blended_b := bg_b/2 + b
 
-// 				SetPoint(fb, x, y, blended_r, blended_g, blended_b)
+// 				SetPoint(Fb, x, y, blended_r, blended_g, blended_b)
 // 			}
 // 		}
 // 	}
 // }
 
-func blendPoint(fb []uint8, x, y int, r, g, b uint8, alpha uint8) {
-	if (resX > x) && (x > 0) && (resY > y) && (y > 0) {
-		offset := (resX*y + x) * 4
-		br := fb[offset+2]
-		bg := fb[offset+1]
-		bb := fb[offset]
+func (gfb *Gfb) blendPoint(x, y int, r, g, b uint8, alpha uint8) {
+	if (gfb.ResX > x) && (x > 0) && (gfb.ResY > y) && (y > 0) {
+		offset := (gfb.ResX*y + x) * 4
+		br := gfb.Fb[offset+2]
+		bg := gfb.Fb[offset+1]
+		bb := gfb.Fb[offset]
 
 		inv := 255 - alpha
 
-		fb[offset] = uint8((int(bb)*int(inv) + int(b)*int(alpha)) / 255)
-		fb[offset+1] = uint8((int(bg)*int(inv) + int(g)*int(alpha)) / 255)
-		fb[offset+2] = uint8((int(br)*int(inv) + int(r)*int(alpha)) / 255)
-		fb[offset+3] = 0
+		gfb.Fb[offset] = uint8((int(bb)*int(inv) + int(b)*int(alpha)) / 255)
+		gfb.Fb[offset+1] = uint8((int(bg)*int(inv) + int(g)*int(alpha)) / 255)
+		gfb.Fb[offset+2] = uint8((int(br)*int(inv) + int(r)*int(alpha)) / 255)
+		gfb.Fb[offset+3] = 0
 	}
 }
 
-func DrawCircle(fb []uint8, y_center, x_center, radius int, r, g, b uint8) {
+func (gfb *Gfb) DrawCircle(y_center, x_center, radius int, r, g, b uint8) {
 	x, y := radius, 0
 	p := 1 - radius
 
 	for x >= y {
-		DrawHLine(fb, x_center-x, y_center+y, x<<1, r, g, b)
+		gfb.DrawHLine(x_center-x, y_center+y, x<<1, r, g, b)
 		if y != 0 {
-			DrawHLine(fb, x_center-x, y_center-y, x<<1, r, g, b)
+			gfb.DrawHLine(x_center-x, y_center-y, x<<1, r, g, b)
 		}
 
 		if x != y && y != 0 {
-			DrawHLine(fb, x_center-y, y_center+x, y<<1, r, g, b)
-			DrawHLine(fb, x_center-y, y_center-x, y<<1, r, g, b)
+			gfb.DrawHLine(x_center-y, y_center+x, y<<1, r, g, b)
+			gfb.DrawHLine(x_center-y, y_center-x, y<<1, r, g, b)
 		}
 
 		y++
@@ -176,16 +183,16 @@ func DrawCircle(fb []uint8, y_center, x_center, radius int, r, g, b uint8) {
 	}
 }
 
-func DrawLine(fb []uint8, x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b uint8) {
+func (gfb *Gfb) DrawLine(x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b uint8) {
 	const M = 15
 	const Ms = 1 << M
 	const I = 0xff
 
 	if x1 == x0 {
-		DrawVLine(fb, x0, y0, y1-y0, r, g, b)
+		gfb.DrawVLine(x0, y0, y1-y0, r, g, b)
 		return
 	} else if y1 == y0 {
-		DrawHLine(fb, x0, y0, x1-x0, r, g, b)
+		gfb.DrawHLine(x0, y0, x1-x0, r, g, b)
 		return
 	}
 
@@ -193,8 +200,8 @@ func DrawLine(fb []uint8, x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b ui
 	dy := y1 - y0
 	d := (dy << M) / dx
 
-	SetPoint(fb, x0, y0, r, g, b)
-	SetPoint(fb, x1, y1, r, g, b)
+	gfb.SetPoint(x0, y0, r, g, b)
+	gfb.SetPoint(x1, y1, r, g, b)
 
 	D := 0
 	for x := x0; x <= x1; x++ {
@@ -208,13 +215,13 @@ func DrawLine(fb []uint8, x0 int, x1 int, y0 int, y1 int, r uint8, g uint8, b ui
 		c1 := uint8(I - v)
 		c2 := uint8(v)
 
-		blendPoint(fb, x, y0, r, g, b, c1)
-		blendPoint(fb, x, y0+1, r, g, b, c2)
+		gfb.blendPoint(x, y0, r, g, b, c1)
+		gfb.blendPoint(x, y0+1, r, g, b, c2)
 	}
 }
 
-func DrawHLine(fb []uint8, xstart, y, length int, r, g, b uint8) {
-	if y < 0 || y >= resY {
+func (gfb *Gfb) DrawHLine(xstart, y, length int, r, g, b uint8) {
+	if y < 0 || y >= gfb.ResY {
 		return
 	}
 	if xstart < 0 {
@@ -222,22 +229,22 @@ func DrawHLine(fb []uint8, xstart, y, length int, r, g, b uint8) {
 		xstart = 0
 	}
 	xend := xstart + length
-	if xend >= resX {
-		xend = resX - 1
+	if xend >= gfb.ResX {
+		xend = gfb.ResX - 1
 	}
 
-	offset := (y*resX + xstart) * 4
+	offset := (y*gfb.ResX + xstart) * 4
 	for x := xstart; x <= xend; x++ {
-		fb[offset] = b
-		fb[offset+1] = g
-		fb[offset+2] = r
-		fb[offset+3] = 0
+		gfb.Fb[offset] = b
+		gfb.Fb[offset+1] = g
+		gfb.Fb[offset+2] = r
+		gfb.Fb[offset+3] = 0
 		offset += 4
 	}
 }
 
-func DrawVLine(fb []uint8, x, ystart, length int, r, g, b uint8) {
-	if x < 0 || x >= resX {
+func (gfb *Gfb) DrawVLine(x, ystart, length int, r, g, b uint8) {
+	if x < 0 || x >= gfb.ResX {
 		return
 	}
 	if ystart < 0 {
@@ -245,38 +252,39 @@ func DrawVLine(fb []uint8, x, ystart, length int, r, g, b uint8) {
 		ystart = 0
 	}
 	yend := ystart + length
-	if yend >= resY {
-		yend = resY - 1
+	if yend >= gfb.ResY {
+		yend = gfb.ResY - 1
 	}
 
-	offset := (ystart*resX + x) * 4
+	offset := (ystart*gfb.ResX + x) * 4
 	for y := ystart; y <= yend; y++ {
-		fb[offset] = b
-		fb[offset+1] = g
-		fb[offset+2] = r
-		fb[offset+3] = 0
-		offset += resX * 4
+		gfb.Fb[offset] = b
+		gfb.Fb[offset+1] = g
+		gfb.Fb[offset+2] = r
+		gfb.Fb[offset+3] = 0
+		offset += gfb.ResX * 4
 	}
 }
 
-func UpdateScreen(fb []uint8) {
-	copy(fbMmap, fb)
+func (gfb *Gfb) UpdateScreen() {
+	copy(fbMmap, gfb.Fb)
 }
 
-// //
 // func main() {
 
-// 	fb := InitFb()
-// 	// drawTestRainbow(fb, (resX-resY)/2, resY+((resX-resY)/2), 0, resY)
-// 	DrawRectangle(fb, 40, 500, 50, 100, 0, 255, 26)
-// 	DrawLine(fb, 80, 800, 50, 100, 0, 255, 26)
-// 	DrawTestRainbow(fb, 50, 320, 50, 320)
-// 	DrawCircle(fb, 600, 600, 300, 255, 255, 0)
-// 	DrawCircle(fb, 70, 70, 50, 255, 0, 0)
-// 	DrawCircle(fb, 70, 120, 50, 0, 255, 0)
-// 	DrawCircle(fb, 70, 170, 50, 0, 0, 255)
-// 	UpdateScreen(fb)
+// 	var fb Gfb
+// 	fb.InitFb(0)
+// 	fb.DrawTestRainbow((fb.ResX-fb.ResY)/2, fb.ResY+((fb.ResX-fb.ResY)/2), 0, fb.ResY)
+// 	fb.DrawRectangle(40, 500, 50, 100, 0, 255, 26)
+// 	fb.DrawLine(80, 800, 50, 100, 0, 255, 26)
+// 	fb.DrawTestRainbow(50, 320, 50, 320)
+// 	fb.DrawCircle(600, 600, 300, 255, 255, 0)
+// 	fb.DrawCircle(70, 70, 50, 255, 0, 0)
+// 	fb.DrawCircle(70, 120, 50, 0, 255, 0)
+// 	fb.DrawCircle(70, 170, 50, 0, 0, 255)
+// 	fb.UpdateScreen()
 
-//		os.Exit(0)
-//	}
-//
+// 	for {
+
+// 	}
+// }
