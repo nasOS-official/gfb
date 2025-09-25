@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 // Package gfb provides a simple API for drawing graphics directly to a Linux framebuffer.
 // It allows low-level manipulation of pixels, shapes, and colors using raw memory-mapped buffers.
 //
